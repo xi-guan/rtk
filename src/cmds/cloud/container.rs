@@ -1,13 +1,15 @@
 //! Filters Docker and kubectl output into compact summaries.
 
+use super::k8s_table;
 use crate::core::guard::never_worse;
 use crate::core::runner::{self, RunOptions};
 use crate::core::shell::display_args;
 use crate::core::stream::exec_capture;
 use crate::core::tracking;
 use crate::core::truncate::{CAP_INVENTORY, CAP_LIST, CAP_WARNINGS};
-use crate::core::utils::resolved_command;
+use crate::core::utils::{bounded_parse_fallback, resolved_command};
 use anyhow::{Context, Result};
+use chrono::Utc;
 use serde_json::Value;
 use std::ffi::OsString;
 use std::process::Command;
@@ -35,10 +37,24 @@ pub fn run(cmd: ContainerCmd, args: &[String], verbose: u8) -> Result<i32> {
     }
 }
 
-fn run_k8s_json<F>(cmd: Command, tool: &str, label: &str, filter_fn: F) -> Result<i32>
+fn run_k8s_json<F, B>(
+    cmd: Command,
+    tool: &str,
+    label: &str,
+    filter_fn: F,
+    baseline_fn: B,
+) -> Result<i32>
 where
     F: Fn(&Value) -> String,
+    B: Fn(&Value) -> String,
 {
+    // built before `cmd` moves; `-o json` past 10 MiB is truncated mid-object and
+    // can never parse, so the hint has to name the command that produced the blob
+    let native_cmd = std::iter::once(tool.to_string())
+        .chain(cmd.get_args().map(|a| a.to_string_lossy().into_owned()))
+        .collect::<Vec<_>>()
+        .join(" ");
+
     runner::run_filtered(
         cmd,
         tool,
@@ -47,12 +63,17 @@ where
             Ok(json) => filter_fn(&json),
             Err(e) => {
                 eprintln!("[rtk] {}: JSON parse failed: {}", tool, e);
-                stdout.to_string()
+                bounded_parse_fallback(stdout, &native_cmd)
             }
         },
         RunOptions::stdout_only()
             .early_exit_on_failure()
-            .no_trailing_newline(),
+            .no_trailing_newline()
+            // rtk forced `-o json`; the user's own command would have printed a table
+            .baseline(move |stdout| match serde_json::from_str::<Value>(stdout) {
+                Ok(json) => baseline_fn(&json),
+                Err(_) => stdout.to_string(),
+            }),
     )
 }
 
@@ -369,7 +390,10 @@ pub fn k8s_pods(tool: &str, args: &[String], _verbose: u8) -> Result<i32> {
     for arg in args {
         cmd.arg(arg);
     }
-    run_k8s_json(cmd, tool, "get pods", format_kubectl_pods)
+    let with_namespace = k8s_table::wants_namespace_column(args);
+    run_k8s_json(cmd, tool, "get pods", format_kubectl_pods, move |json| {
+        k8s_table::pods_table(json, with_namespace, Utc::now())
+    })
 }
 
 fn format_kubectl_pods(json: &Value) -> String {
@@ -457,7 +481,14 @@ pub fn k8s_services(tool: &str, args: &[String], _verbose: u8) -> Result<i32> {
     for arg in args {
         cmd.arg(arg);
     }
-    run_k8s_json(cmd, tool, "get services", format_kubectl_services)
+    let with_namespace = k8s_table::wants_namespace_column(args);
+    run_k8s_json(
+        cmd,
+        tool,
+        "get services",
+        format_kubectl_services,
+        move |json| k8s_table::services_table(json, with_namespace, Utc::now()),
+    )
 }
 
 fn format_kubectl_services(json: &Value) -> String {

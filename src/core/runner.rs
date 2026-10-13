@@ -218,6 +218,8 @@ pub struct RunOptions<'a> {
     /// `[]`. See [`guard_stdout`]. Not consulted when `tee_label` is set.
     pub clean_outputs: &'a [&'a str],
     pub unguarded_help: bool,
+    /// Savings baseline when rtk rewrote the command into a fatter form; `None` = raw stdout.
+    pub baseline_fn: Option<CaptureFilter<'a>>,
 }
 
 impl<'a> RunOptions<'a> {
@@ -262,6 +264,14 @@ impl<'a> RunOptions<'a> {
 
     pub fn clean_outputs(mut self, outputs: &'a [&'a str]) -> Self {
         self.clean_outputs = outputs;
+        self
+    }
+
+    pub fn baseline<F>(mut self, baseline_fn: F) -> Self
+    where
+        F: Fn(&str) -> String + 'a,
+    {
+        self.baseline_fn = Some(Box::new(baseline_fn));
         self
     }
 }
@@ -369,7 +379,21 @@ where
         Some(text) => Cow::Owned(format!("{}{}", shown, text)),
         None => Cow::Borrowed(shown.as_str()),
     };
-    timer.track(cmd_label, &format!("rtk {}", cmd_label), raw, &emitted);
+    // ledger only: never_worse must keep guarding against raw, or it would print the fat output
+    let tracked_input = match &opts.baseline_fn {
+        // the native command prints the same stderr, and `emitted` counts it too
+        Some(baseline_fn) if opts.filter_stdout_only => {
+            Cow::Owned(format!("{}{}", baseline_fn(raw_stdout), result.raw_stderr))
+        }
+        Some(baseline_fn) => Cow::Owned(baseline_fn(raw)),
+        None => Cow::Borrowed(raw.as_str()),
+    };
+    timer.track(
+        cmd_label,
+        &format!("rtk {}", cmd_label),
+        &tracked_input,
+        &emitted,
+    );
     Ok(exit_code)
 }
 

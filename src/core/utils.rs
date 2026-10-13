@@ -248,6 +248,28 @@ pub fn fallback_tail(output: &str, label: &str, n: usize) -> String {
     lines[start..].join("\n")
 }
 
+/// Stand-in for output a JSON filter could not parse.
+///
+/// Short blobs pass through verbatim — they are almost always the tool's own
+/// plain-text error, which is exactly what the reader wants. A large one is
+/// capped instead: rtk is the reason the command emitted JSON at all, so dumping
+/// megabytes of it (stream capture allows up to 10 MiB) is strictly worse than
+/// not having rtk installed. `native_cmd` is the command to run to get it back.
+pub fn bounded_parse_fallback(output: &str, native_cmd: &str) -> String {
+    let cap = crate::core::config::limits().passthrough_max_chars;
+    let total = output.chars().count();
+    if total <= cap {
+        return output.to_string();
+    }
+    format!(
+        "{}\n[rtk] not JSON: kept first {} of {} chars — run `{}` for the full output",
+        truncate(output, cap),
+        cap,
+        total,
+        native_cmd
+    )
+}
+
 /// Create a directory owner-only (0700 on Unix), tightening one that already exists.
 pub fn create_private_dir(path: &std::path::Path) -> std::io::Result<()> {
     fs::create_dir_all(path)?;
