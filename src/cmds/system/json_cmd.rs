@@ -1,6 +1,7 @@
 //! Inspects JSON structure without showing values, saving tokens on large payloads.
 
 use crate::core::guard::never_worse;
+use crate::core::sensitive_guard;
 use crate::core::tracking;
 use crate::core::utils::{from_json_str, strip_leading_bom};
 use anyhow::{Context, Result, bail};
@@ -40,6 +41,7 @@ fn validate_json_extension(file: &Path) -> Result<()> {
 
 /// Show JSON (compact with values by default, or keys-only with --keys-only)
 pub fn run(file: &Path, max_depth: usize, schema_only: bool, verbose: u8) -> Result<()> {
+    sensitive_guard::check_path(file)?;
     validate_json_extension(file)?;
     let timer = tracking::TimedExecution::start();
 

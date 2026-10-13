@@ -26,6 +26,7 @@ pub mod pipeline_remote;
 pub mod plugins_cmd;
 pub mod retriever;
 pub mod runner;
+pub mod sensitive_guard;
 pub mod shell;
 pub mod stream;
 #[cfg(feature = "engine")]

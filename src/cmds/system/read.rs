@@ -2,6 +2,7 @@
 
 use crate::core::filter::{self, FilterLevel, Language};
 use crate::core::guard::never_worse;
+use crate::core::sensitive_guard;
 use crate::core::shell::quote_word;
 use crate::core::tracking::{self, estimate_tokens};
 use anyhow::{Context, Result};
@@ -19,6 +20,7 @@ pub fn run(
     line_numbers: bool,
     verbose: u8,
 ) -> Result<()> {
+    sensitive_guard::check_path(file)?;
     let timer = tracking::TimedExecution::start();
 
     // The one core touch: `rtk read` evaluates the pipeline's

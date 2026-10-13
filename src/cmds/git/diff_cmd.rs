@@ -1,6 +1,7 @@
 //! Compares two files and shows only the changed lines.
 
 use crate::core::guard::never_worse;
+use crate::core::sensitive_guard;
 use crate::core::shell::display_args;
 use crate::core::tracking;
 use anyhow::{Context, Result};
@@ -42,6 +43,8 @@ const DIFF_EXIT_TROUBLE: i32 = 2;
 /// Returns the diff-convention exit code: 0 if identical, 1 if files differ,
 /// 2 if an operand cannot be read.
 pub fn run(file1: &Path, file2: &Path, verbose: u8) -> Result<i32> {
+    sensitive_guard::check_path(file1)?;
+    sensitive_guard::check_path(file2)?;
     let timer = tracking::TimedExecution::start();
     let command = format!(
         "diff {}",

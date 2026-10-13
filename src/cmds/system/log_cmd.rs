@@ -1,6 +1,7 @@
 //! Deduplicates repeated log lines and shows counts instead.
 
 use crate::core::guard::never_worse;
+use crate::core::sensitive_guard;
 use crate::core::tracking;
 use crate::core::truncate::{CAP_WARNINGS, reduced};
 use anyhow::Result;
@@ -24,6 +25,7 @@ static PATH_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"/[\w./\-]+").unw
 
 /// Filter and deduplicate log output
 pub fn run_file(file: &Path, verbose: u8) -> Result<()> {
+    sensitive_guard::check_path(file)?;
     let timer = tracking::TimedExecution::start();
 
     if verbose > 0 {

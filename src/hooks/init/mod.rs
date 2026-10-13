@@ -1336,6 +1336,11 @@ pub fn save_telemetry_consent(accepted: bool) -> Result<()> {
 fn prompt_telemetry_consent() -> Result<()> {
     use std::io::{self, BufRead, IsTerminal};
 
+    // no telemetry URL compiled in → nothing to consent to
+    if option_env!("RTK_TELEMETRY_URL").is_none() {
+        return Ok(());
+    }
+
     let config = crate::core::config::Config::load().unwrap_or_default();
     match config.telemetry.consent_given {
         Some(true) => return Ok(()),

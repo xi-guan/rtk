@@ -6,9 +6,11 @@ use std::fs;
 use std::path::Path;
 
 use crate::core::filter::Language;
+use crate::core::sensitive_guard;
 
 /// Heuristic-based code summarizer - no external model needed
 pub fn run(file: &Path, _model: &str, _force_download: bool, verbose: u8) -> Result<()> {
+    sensitive_guard::check_path(file)?;
     if verbose > 0 {
         eprintln!("Analyzing: {}", file.display());
     }
