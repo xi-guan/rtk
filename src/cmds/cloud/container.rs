@@ -832,17 +832,18 @@ pub fn run_compose_passthrough(args: &[OsString], verbose: u8) -> Result<i32> {
     crate::core::runner::run_passthrough("docker", &combined, verbose)
 }
 
-pub fn run_kubectl_get(args: &[String], verbose: u8) -> Result<i32> {
-    run_k8s_get("kubectl", args, verbose)
+pub fn run_kubectl_get(globals: &[String], args: &[String], verbose: u8) -> Result<i32> {
+    run_k8s_get("kubectl", globals, args, verbose)
 }
 
-fn run_k8s_get(tool: &str, args: &[String], verbose: u8) -> Result<i32> {
+// globals are flags typed before `get`; they stay out of the resource lookup
+fn run_k8s_get(tool: &str, globals: &[String], args: &[String], verbose: u8) -> Result<i32> {
     match k8s_get_target(args) {
-        Some(("pods", rest)) => k8s_pods(tool, rest, verbose),
-        Some(("services", rest)) => k8s_services(tool, rest, verbose),
+        Some(("pods", rest)) => k8s_pods(tool, &[globals, rest].concat(), verbose),
+        Some(("services", rest)) => k8s_services(tool, &[globals, rest].concat(), verbose),
         _ => {
             let passthrough_args: Vec<OsString> = std::iter::once(OsString::from("get"))
-                .chain(args.iter().map(|arg| OsString::from(arg.as_str())))
+                .chain(globals.iter().chain(args).map(OsString::from))
                 .collect();
             crate::core::runner::run_passthrough(tool, &passthrough_args, verbose)
         }
@@ -878,7 +879,7 @@ pub fn run_kubectl_passthrough(args: &[OsString], verbose: u8) -> Result<i32> {
 }
 
 pub fn run_oc_get(args: &[String], verbose: u8) -> Result<i32> {
-    run_k8s_get("oc", args, verbose)
+    run_k8s_get("oc", &[], args, verbose)
 }
 
 pub fn run_oc_passthrough(args: &[OsString], verbose: u8) -> Result<i32> {

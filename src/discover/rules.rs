@@ -459,7 +459,7 @@ pub const RULES: &[RtkRule] = &[
         ..RtkRule::DEFAULT
     },
     RtkRule {
-        pattern: r"^kubectl\s+(get|logs|describe|apply)(?:\s|$|[;|&()<>])",
+        pattern: r"^kubectl\s+(?:(?:--context|--namespace)(?:=|\s+)\S+\s+|-n\s*\S+\s+)*(get|logs|describe|apply)(?:\s|$|[;|&()<>])",
         rtk_cmd: "rtk kubectl",
         rewrite_prefixes: &["kubectl"],
         category: "Infra",

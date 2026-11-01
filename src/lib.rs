@@ -414,6 +414,14 @@ enum Commands {
 
     /// Kubectl commands with compact output
     Kubectl {
+        /// Kubeconfig context (like kubectl --context, typed before the subcommand)
+        #[arg(long)]
+        context: Option<String>,
+
+        /// Namespace (like kubectl -n, typed before the subcommand)
+        #[arg(short = 'n', long)]
+        namespace: Option<String>,
+
         #[command(subcommand)]
         command: KubectlCommands,
     },
@@ -2211,6 +2219,24 @@ fn build_k8s_namespace_args(
     K8sAlias::Filtered(args)
 }
 
+/// kubectl flags typed before the subcommand; callers put them ahead of its own args so a repeat still wins.
+fn k8s_global_args(context: Option<String>, namespace: Option<String>) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(c) = context {
+        args.push("--context".to_string());
+        args.push(c);
+    }
+    if let Some(n) = namespace {
+        args.push("-n".to_string());
+        args.push(n);
+    }
+    args
+}
+
+fn prepend_os_args(front: &[String], rest: Vec<OsString>) -> Vec<OsString> {
+    front.iter().map(OsString::from).chain(rest).collect()
+}
+
 fn build_k8s_logs_args(pod: String, container: Option<String>) -> Vec<String> {
     let mut args = vec![pod];
     if let Some(cont) = container {
@@ -2927,38 +2953,59 @@ fn run_cli() -> Result<i32> {
             DockerCommands::Other(args) => container::run_docker_passthrough(&args, cli.verbose)?,
         },
 
-        Commands::Kubectl { command } => match command {
-            KubectlCommands::Get { args } => container::run_kubectl_get(&args, cli.verbose)?,
-            KubectlCommands::Pods {
-                namespace,
-                all,
-                extra,
-            } => match build_k8s_namespace_args("pods", namespace, all, extra) {
-                K8sAlias::Filtered(args) => {
-                    container::run(container::ContainerCmd::KubectlPods, &args, cli.verbose)?
+        Commands::Kubectl {
+            context,
+            namespace,
+            command,
+        } => {
+            let globals = k8s_global_args(context, namespace);
+            match command {
+                KubectlCommands::Get { args } => {
+                    container::run_kubectl_get(&globals, &args, cli.verbose)?
                 }
-                K8sAlias::Raw(argv) => {
-                    core::runner::run_passthrough("kubectl", &argv, cli.verbose)?
+                KubectlCommands::Pods {
+                    namespace,
+                    all,
+                    extra,
+                } => match build_k8s_namespace_args("pods", namespace, all, extra) {
+                    K8sAlias::Filtered(args) => container::run(
+                        container::ContainerCmd::KubectlPods,
+                        &[globals, args].concat(),
+                        cli.verbose,
+                    )?,
+                    K8sAlias::Raw(argv) => core::runner::run_passthrough(
+                        "kubectl",
+                        &prepend_os_args(&globals, argv),
+                        cli.verbose,
+                    )?,
+                },
+                KubectlCommands::Services {
+                    namespace,
+                    all,
+                    extra,
+                } => match build_k8s_namespace_args("services", namespace, all, extra) {
+                    K8sAlias::Filtered(args) => container::run(
+                        container::ContainerCmd::KubectlServices,
+                        &[globals, args].concat(),
+                        cli.verbose,
+                    )?,
+                    K8sAlias::Raw(argv) => core::runner::run_passthrough(
+                        "kubectl",
+                        &prepend_os_args(&globals, argv),
+                        cli.verbose,
+                    )?,
+                },
+                KubectlCommands::Logs { pod, container: c } => {
+                    // after the pod: k8s_logs reads its first arg as the pod name
+                    let args = [build_k8s_logs_args(pod, c), globals].concat();
+                    container::run(container::ContainerCmd::KubectlLogs, &args, cli.verbose)?
                 }
-            },
-            KubectlCommands::Services {
-                namespace,
-                all,
-                extra,
-            } => match build_k8s_namespace_args("services", namespace, all, extra) {
-                K8sAlias::Filtered(args) => {
-                    container::run(container::ContainerCmd::KubectlServices, &args, cli.verbose)?
-                }
-                K8sAlias::Raw(argv) => {
-                    core::runner::run_passthrough("kubectl", &argv, cli.verbose)?
-                }
-            },
-            KubectlCommands::Logs { pod, container: c } => {
-                let args = build_k8s_logs_args(pod, c);
-                container::run(container::ContainerCmd::KubectlLogs, &args, cli.verbose)?
+                KubectlCommands::Other(args) => container::run_kubectl_passthrough(
+                    &prepend_os_args(&globals, args),
+                    cli.verbose,
+                )?,
             }
-            KubectlCommands::Other(args) => container::run_kubectl_passthrough(&args, cli.verbose)?,
-        },
+        }
 
         Commands::Oc { command } => match command {
             OcCommands::Get { args } => container::run_oc_get(&args, cli.verbose)?,
@@ -4372,7 +4419,28 @@ mod tests {
         match cli.command {
             Commands::Kubectl {
                 command: KubectlCommands::Get { args },
+                ..
             } => assert_eq!(args, vec!["pods", "-n", "default"]),
+            _ => panic!("Expected Kubectl Get command"),
+        }
+    }
+
+    #[test]
+    fn test_try_parse_kubectl_leading_context_and_namespace() {
+        let cli =
+            try_parse_cli_from(["rtk", "kubectl", "--context=dev", "-n", "ns", "get", "pods"])
+                .unwrap();
+
+        match cli.command {
+            Commands::Kubectl {
+                context,
+                namespace,
+                command: KubectlCommands::Get { args },
+            } => {
+                assert_eq!(context.as_deref(), Some("dev"));
+                assert_eq!(namespace.as_deref(), Some("ns"));
+                assert_eq!(args, vec!["pods"]);
+            }
             _ => panic!("Expected Kubectl Get command"),
         }
     }

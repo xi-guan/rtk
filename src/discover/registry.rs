@@ -5638,6 +5638,35 @@ mod tests {
     }
 
     #[test]
+    fn test_rewrite_kubectl_leading_context_and_namespace() {
+        for cmd in [
+            "kubectl --context dev get pods",
+            "kubectl --context=dev get pods -A",
+            "kubectl -n ns logs mypod",
+            "kubectl -nns apply -f deploy.yaml",
+            "kubectl --context dev --namespace=ns describe pod p",
+        ] {
+            assert_eq!(
+                rewrite_command_no_prefixes(cmd, &[]),
+                Some(format!("rtk {cmd}")),
+                "{cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_rewrite_kubectl_other_leading_flags_stay_raw() {
+        for cmd in [
+            "kubectl --kubeconfig k get pods",
+            "kubectl --context dev exec p -- ls",
+            "kubectl --context dev",
+            "kubectl --context get",
+        ] {
+            assert_eq!(rewrite_command_no_prefixes(cmd, &[]), None, "{cmd}");
+        }
+    }
+
+    #[test]
     fn test_rewrite_docker_run() {
         assert_eq!(
             rewrite_command_no_prefixes("docker run --rm ubuntu bash", &[]),
